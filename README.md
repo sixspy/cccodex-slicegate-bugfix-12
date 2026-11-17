@@ -7,6 +7,17 @@
 
 业务日分区切片登记后裁决完整度，完整才放行下游，并与消费水位对账
 
+## 驳回写边界（甲规则，2026-11-17 钉死锁定）
+
+口径全文见 `docs/驳回边界说明.md`，后端常量与 `GET /api/policy`（只读、附 sha256 哈希）同源，当日无修改入口：
+
+- 驳回路径对正式切片表 `slices` **零更新**：只改待审队列 `review_tickets` 的状态与驳回原因，回滚待审草稿（单据置「已驳回」，草稿永不合并）。
+- 驳回事务连接安装 SQLite authorizer，对 `slices`/`releases`/`watermarks` 及一切 DDL 在引擎层 DENY；越权写整笔回滚、返回 403「驳回口径偏了」，并向 `audit_log(kind=deviation)` 留痕。
+- 禁止驳回改正式切片行数或完整度，禁止驳回后推水位。
+- 同单驳回/确认撞车：`BEGIN IMMEDIATE` 库级写锁串行，后手 409 并落 `conflict_queue`；正式行只有确认入口按合并规则可改。
+- 候审列表、分区详情（`/api/partitions`）、冲突队列（`/api/conflicts`）、策略条（`/api/policy`）、处置页（`/api/audit`）五视图同源互证。
+- 库仍为单机 SQLite（`data/app.db`），登录方式、端口、域名均不变。
+
 ## 基本信息
 
 | 项 | 值 |

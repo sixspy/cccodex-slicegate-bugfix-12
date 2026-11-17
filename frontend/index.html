@@ -6,33 +6,44 @@
 <title>日切放行</title>
 <script src="/static/vue.global.prod.js"></script>
 <style>
-  :root{--bg:#0b1220;--panel:#121a2b;--line:#243049;--text:#e8eefc;--muted:#93a0b8;--ok:#3ddc97;--bad:#ff6b6b;--accent:#4cc9f0}
+  :root{--bg:#0b1220;--panel:#121a2b;--line:#243049;--text:#e8eefc;--muted:#93a0b8;--ok:#3ddc97;--bad:#ff6b6b;--warn:#ffb454;--accent:#4cc9f0}
   *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
   .top{display:flex;align-items:center;gap:18px;padding:14px 20px;border-bottom:1px solid var(--line);background:#0e1626}
   .brand{font-weight:700;letter-spacing:.08em;font-size:18px}
   .brand small{display:block;color:var(--muted);font-weight:400;font-size:11px;letter-spacing:.02em;margin-top:2px}
-  .tabs{display:flex;gap:6px;flex:1}
+  .tabs{display:flex;gap:6px;flex:1;flex-wrap:wrap}
   .tabs button{background:transparent;border:1px solid transparent;color:var(--muted);padding:8px 12px;border-radius:999px;cursor:pointer}
   .tabs button.on{color:var(--text);border-color:var(--line);background:#18233a}
   .user{color:var(--muted);font-size:13px}
   .ghost{background:#18233a;border:1px solid var(--line);color:var(--text);padding:7px 10px;border-radius:8px;cursor:pointer}
+  .ghost:disabled{opacity:.45;cursor:not-allowed}
   main{padding:18px 20px 28px}
   .grid{display:grid;grid-template-columns:1.2fr .8fr;gap:14px}
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
   h2{margin:0 0 10px;font-size:15px;color:#c9d4ea}
   table{width:100%;border-collapse:collapse;font-size:13px}
-  th,td{padding:8px 6px;border-bottom:1px solid var(--line);text-align:left}
+  th,td{padding:8px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
   th{color:var(--muted);font-weight:600}
   input,select{width:100%;background:#0b1220;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 10px;margin:4px 0 10px}
   .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
   .primary{background:var(--accent);color:#041018;border:0;padding:9px 12px;border-radius:8px;font-weight:700;cursor:pointer}
+  .danger{background:var(--bad);color:#1c0808;border:0;padding:7px 12px;border-radius:8px;font-weight:700;cursor:pointer}
+  .okbtn{background:var(--ok);color:#06140d;border:0;padding:7px 12px;border-radius:8px;font-weight:700;cursor:pointer}
   .mono{font-family:Consolas,"Courier New",monospace}
   .tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;background:#1b2a22;color:var(--ok)}
   .tag.bad{background:#2a1518;color:var(--bad)}
+  .tag.warn{background:#2d2410;color:var(--warn)}
+  .tag.mut{background:#18233a;color:var(--muted)}
   .login{max-width:400px;margin:12vh auto;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px}
   .err{color:var(--bad);min-height:18px;font-size:13px}
-  .kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+  .kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
   .kpi .panel{padding:12px}.kpi b{display:block;font-size:22px;margin-top:4px}
+  .policy{display:flex;gap:14px;align-items:center;flex-wrap:wrap;background:#101d33;border:1px solid #1f3a5f;border-radius:12px;padding:12px 14px;margin-bottom:14px;font-size:13px}
+  .policy .lock{color:var(--ok);font-weight:700}
+  .policy .dev{color:var(--bad);font-weight:700}
+  .policy .hash{color:var(--muted);font-size:12px}
+  .reasonbox{background:#0b1220;border:1px solid var(--line);border-radius:10px;padding:10px;margin-top:8px}
+  .muted{color:var(--muted)}
 </style>
 </head>
 <body>
@@ -54,23 +65,30 @@ createApp({
   setup(){
     const token=ref(localStorage.getItem('slicegate_token')||'');
     const user=ref(localStorage.getItem('slicegate_user')||'');
+    const role=ref(localStorage.getItem('slicegate_role')||'');
     const username=ref('admin'), password=ref('123456'), err=ref(''), tab=ref(0), actionErr=ref('');
-    const slices=ref([]), releases=ref([]), watermarks=ref([]);
+    const slices=ref([]), releases=ref([]), watermarks=ref([]), reviews=ref([]);
+    const conflicts=ref([]), audits=ref([]), partitions=ref([]), policy=ref(null);
     const form=ref({slice_no:'SL-2026-11-03-east',biz_date:'2026-11-03',partition_key:'east',row_count:1000,expected_count:1000});
+    const rv=ref({slice_no:'SL-2026-11-02-east',draft_row_count:1000,draft_expected_count:1000,note:''});
     const releaseSliceId=ref(1), consumer=ref('ads_order');
-    const nav=['切片登记','完整度裁决','下游放行','消费水位'];
+    const rejectTarget=ref(''), rejectReason=ref('');
+    const nav=['切片登记','完整度裁决','待审候审','分区详情','下游放行','消费水位','冲突队列','处置页'];
+    const isAdmin=computed(()=>role.value==='管理员');
     const completeCnt=computed(()=>slices.value.filter(s=>s.completeness==='完整').length);
     const openCnt=computed(()=>slices.value.filter(s=>s.release_status!=='已放行').length);
+    const pendingCnt=computed(()=>reviews.value.filter(r=>r.status==='待审').length);
+    const deviationCnt=computed(()=>audits.value.filter(a=>a.kind==='deviation').length);
     function auth(){return {Authorization:'Bearer '+token.value,'Content-Type':'application/json'};}
     async function login(){
       err.value='';
       const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username.value,password:password.value})});
       const j=await r.json(); if(!r.ok){err.value=j.detail||'登录失败';return;}
-      token.value=j.token; user.value=j.username;
-      localStorage.setItem('slicegate_token',j.token); localStorage.setItem('slicegate_user',j.username);
+      token.value=j.token; user.value=j.username; role.value=j.role;
+      localStorage.setItem('slicegate_token',j.token); localStorage.setItem('slicegate_user',j.username); localStorage.setItem('slicegate_role',j.role);
       await refresh();
     }
-    function logout(){token.value='';user.value='';localStorage.removeItem('slicegate_token');localStorage.removeItem('slicegate_user');}
+    function logout(){token.value='';user.value='';role.value='';['slicegate_token','slicegate_user','slicegate_role'].forEach(k=>localStorage.removeItem(k));}
     async function loadJson(url){
       const r=await fetch(url,{headers:auth()});
       const j=await r.json().catch(()=>({}));
@@ -79,19 +97,55 @@ createApp({
     }
     async function refresh(){
       if(!token.value) return;
+      actionErr.value='';
       const s=await loadJson('/api/slices'); if(s===null) return;
       slices.value=Array.isArray(s.items)?s.items:[];
       const rel=await loadJson('/api/releases'); if(rel===null) return;
       releases.value=Array.isArray(rel.items)?rel.items:[];
       const w=await loadJson('/api/watermarks'); if(w===null) return;
       watermarks.value=Array.isArray(w.items)?w.items:[];
+      const rv2=await loadJson('/api/reviews'); if(rv2===null) return;
+      reviews.value=Array.isArray(rv2.items)?rv2.items:[];
+      const cf=await loadJson('/api/conflicts'); if(cf===null) return;
+      conflicts.value=Array.isArray(cf.items)?cf.items:[];
+      const au=await loadJson('/api/audit'); if(au===null) return;
+      audits.value=Array.isArray(au.items)?au.items:[];
+      const pa=await loadJson('/api/partitions'); if(pa===null) return;
+      partitions.value=Array.isArray(pa.items)?pa.items:[];
+      const po=await loadJson('/api/policy'); if(po===null) return;
+      policy.value=po;
       if(slices.value.length) releaseSliceId.value=slices.value[0].id;
     }
     async function createSlice(){actionErr.value='';const r=await fetch('/api/slices',{method:'POST',headers:auth(),body:JSON.stringify(form.value)});const j=await r.json();if(!r.ok)actionErr.value=j.detail||'失败';await refresh();}
-    async function evaluate(id){await fetch('/api/slices/'+id+'/evaluate',{method:'POST',headers:auth()});await refresh();}
+    async function evaluate(id){const r=await fetch('/api/slices/'+id+'/evaluate',{method:'POST',headers:auth()});if(!r.ok){const j=await r.json().catch(()=>({}));actionErr.value=j.detail||'裁决失败';}await refresh();}
     async function doRelease(){actionErr.value='';const r=await fetch('/api/slices/'+releaseSliceId.value+'/release',{method:'POST',headers:auth(),body:JSON.stringify({consumer:consumer.value})});const j=await r.json();if(!r.ok)actionErr.value=j.detail||'放行失败';await refresh();}
+    async function submitReview(){
+      actionErr.value='';
+      const r=await fetch('/api/reviews',{method:'POST',headers:auth(),body:JSON.stringify(rv.value)});
+      const j=await r.json(); if(!r.ok){actionErr.value=j.detail||'提交失败';return;}
+      rv.value.note=''; await refresh();
+    }
+    function openReject(no){rejectTarget.value=rejectTarget.value===no?'':no;rejectReason.value='';actionErr.value='';}
+    async function doReject(no){
+      actionErr.value='';
+      if(!rejectReason.value.trim()){actionErr.value='驳回原因不能为空';return;}
+      const r=await fetch('/api/reviews/'+no+'/reject',{method:'POST',headers:auth(),body:JSON.stringify({reason:rejectReason.value})});
+      const j=await r.json();
+      if(!r.ok){actionErr.value=j.detail||'驳回失败';}
+      rejectTarget.value='';rejectReason.value='';
+      await refresh();
+    }
+    async function doConfirm(no){
+      actionErr.value='';
+      const r=await fetch('/api/reviews/'+no+'/confirm',{method:'POST',headers:auth()});
+      const j=await r.json(); if(!r.ok){actionErr.value=j.detail||'确认失败';}
+      await refresh();
+    }
+    function stTag(s){return s==='待审'?'warn':(s==='已驳回'?'bad':(s==='已确认'?'':'mut'));}
     onMounted(()=>{if(token.value)refresh();});
-    return {token,user,username,password,err,tab,nav,slices,releases,watermarks,form,releaseSliceId,consumer,actionErr,completeCnt,openCnt,login,logout,createSlice,evaluate,doRelease};
+    return {token,user,role,isAdmin,username,password,err,tab,nav,slices,releases,watermarks,reviews,conflicts,audits,partitions,policy,
+      form,rv,releaseSliceId,consumer,actionErr,completeCnt,openCnt,pendingCnt,deviationCnt,
+      rejectTarget,rejectReason,login,logout,createSlice,evaluate,doRelease,submitReview,openReject,doReject,doConfirm,stTag};
   },
   template:`
   <div v-if="!token" class="login">
@@ -101,19 +155,29 @@ createApp({
   </div>
   <div v-if="token">
     <div class="top">
-      <div class="brand">日切放行<small>切片 → 完整度 → 放行 → 水位</small></div>
+      <div class="brand">日切放行<small>切片 → 完整度 → 待审 → 放行 → 水位</small></div>
       <div class="tabs"><button v-for="(n,i) in nav" :key="n" :class="{on:tab===i}" @click="tab=i">{{n}}</button></div>
-      <div class="user">{{user}}</div><button class="ghost" @click="logout">退出</button>
+      <div class="user">{{user}}（{{role}}）</div><button class="ghost" @click="logout">退出</button>
     </div>
     <main>
+      <div class="policy" v-if="policy">
+        <span class="lock">🔒 {{policy.rule_name}}（{{policy.rule_id}}规则，{{policy.locked_date}} 当日口径锁定）</span>
+        <span class="muted">驳回可写：{{policy.writable_tables.join('、')}}</span>
+        <span class="muted">驳回禁写：{{policy.forbidden_tables.join('、')}}</span>
+        <span :class="{dev:policy.deviation_total>0}">偏离记录 {{policy.deviation_total}}</span>
+        <span class="muted">冲突 {{policy.conflict_total}} · 待审 {{policy.pending_total}}</span>
+        <span class="hash mono">hash {{policy.boundary_hash.slice(0,12)}}…（只读，无修改入口）</span>
+      </div>
       <div class="kpi">
         <div class="panel">切片总数<b class="mono">{{slices.length}}</b></div>
         <div class="panel">已完整<b class="mono">{{completeCnt}}</b></div>
         <div class="panel">未放行<b class="mono">{{openCnt}}</b></div>
+        <div class="panel">待审单<b class="mono">{{pendingCnt}}</b></div>
       </div>
+      <div class="err">{{actionErr}}</div>
       <div v-show="tab===0" class="grid">
         <div class="panel">
-          <h2>在途切片</h2>
+          <h2>在途切片（正式切片表）</h2>
           <table><thead><tr><th>切片号</th><th>日/区</th><th>实收</th><th>完整度</th><th></th></tr></thead>
           <tbody><tr v-for="s in slices" :key="s.id">
             <td class="mono">{{s.slice_no}}</td><td>{{s.biz_date}} / {{s.partition_key}}</td>
@@ -128,7 +192,6 @@ createApp({
           <div class="row"><div><label>分区</label><input v-model="form.partition_key"/></div><div><label>实收</label><input type="number" v-model.number="form.row_count"/></div></div>
           <label>期望</label><input type="number" v-model.number="form.expected_count"/>
           <button class="primary" @click="createSlice">写入登记</button>
-          <div class="err">{{actionErr}}</div>
         </div>
       </div>
       <div v-show="tab===1" class="panel">
@@ -139,13 +202,60 @@ createApp({
           <td>{{s.completeness}}</td><td>{{s.release_status}}</td>
         </tr></tbody></table>
       </div>
-      <div v-show="tab===2" class="grid">
+      <div v-show="tab===2">
+        <div class="panel" style="margin-bottom:14px">
+          <h2>提交待审（草稿进候审队列，不直接碰正式行）</h2>
+          <div class="row"><div><label>对应正式切片号</label><input v-model="rv.slice_no"/></div><div><label>备注</label><input v-model="rv.note"/></div></div>
+          <div class="row"><div><label>草稿实收</label><input type="number" v-model.number="rv.draft_row_count"/></div><div><label>草稿期望</label><input type="number" v-model.number="rv.draft_expected_count"/></div></div>
+          <button class="primary" @click="submitReview">提交待审</button>
+        </div>
+        <div class="panel">
+          <h2>候审列表（驳回只改本队列状态与原因，正式行零更新）</h2>
+          <table><thead><tr><th>待审单号</th><th>切片</th><th>草稿/正式</th><th>状态</th><th>驳回原因</th><th>版本</th><th>处置</th></tr></thead>
+          <tbody><tr v-for="r in reviews" :key="r.id">
+            <td class="mono">{{r.ticket_no}}</td>
+            <td class="mono">{{r.draft_slice_no}}<br/><span class="muted">{{r.biz_date}}/{{r.partition_key}}</span></td>
+            <td class="mono">草稿 {{r.draft_row_count}}/{{r.draft_expected_count}}<br/>正式 {{r.official_row_count}}/{{r.official_expected_count}}（{{r.official_completeness}}）</td>
+            <td><span class="tag" :class="stTag(r.status)">{{r.status}}</span></td>
+            <td>{{r.reject_reason||'—'}}</td>
+            <td class="mono">v{{r.version}}</td>
+            <td>
+              <template v-if="r.status==='待审' && isAdmin">
+                <button class="danger" @click="openReject(r.ticket_no)">驳回</button>
+                <button class="okbtn" @click="doConfirm(r.ticket_no)">确认</button>
+              </template>
+              <span v-else-if="!isAdmin" class="muted">只读角色</span>
+              <span v-else class="muted">已终结</span>
+              <div v-if="rejectTarget===r.ticket_no" class="reasonbox">
+                <label>驳回原因（仅写入待审队列，正式切片表零更新）</label>
+                <input v-model="rejectReason" placeholder="例如：草稿口径不符，回滚草稿"/>
+                <button class="danger" @click="doReject(r.ticket_no)">确认驳回</button>
+                <button class="ghost" @click="openReject(r.ticket_no)">取消</button>
+              </div>
+            </td>
+          </tr></tbody></table>
+        </div>
+      </div>
+      <div v-show="tab===3" class="panel">
+        <h2>分区详情（与候审列表、冲突队列同源互证）</h2>
+        <table><thead><tr><th>切片号</th><th>日/区</th><th>正式行实收</th><th>完整度</th><th>放行态</th><th>待审</th><th>已驳回</th><th>已确认</th></tr></thead>
+        <tbody><tr v-for="p in partitions" :key="p.id">
+          <td class="mono">{{p.slice_no}}</td><td>{{p.biz_date}} / {{p.partition_key}}</td>
+          <td class="mono">{{p.row_count}}/{{p.expected_count}}</td>
+          <td><span class="tag" :class="{bad:p.completeness!=='完整'}">{{p.completeness}}</span></td>
+          <td>{{p.release_status}}</td>
+          <td class="mono">{{p.pending_cnt}}</td><td class="mono">{{p.rejected_cnt}}</td><td class="mono">{{p.confirmed_cnt}}</td>
+        </tr></tbody></table>
+        <p class="muted" style="margin-top:8px">汇总：待审 {{partitions.reduce((a,p)=>a+p.pending_cnt,0)}} ·
+          已驳回 {{partitions.reduce((a,p)=>a+p.rejected_cnt,0)}} ·
+          已确认 {{partitions.reduce((a,p)=>a+p.confirmed_cnt,0)}}，与候审列表一致。</p>
+      </div>
+      <div v-show="tab===4" class="grid">
         <div class="panel">
           <h2>申请放行</h2>
           <label>切片</label><select v-model.number="releaseSliceId"><option v-for="s in slices" :value="s.id">{{s.slice_no}}（{{s.completeness}}）</option></select>
           <label>下游</label><input v-model="consumer"/>
           <button class="primary" @click="doRelease">放行</button>
-          <div class="err">{{actionErr}}</div>
         </div>
         <div class="panel">
           <h2>放行流水</h2>
@@ -153,10 +263,32 @@ createApp({
           <tbody><tr v-for="r in releases" :key="r.id"><td class="mono">{{r.slice_no}}</td><td>{{r.consumer}}</td><td>{{r.status}}</td><td class="mono">{{r.created_at}}</td></tr></tbody></table>
         </div>
       </div>
-      <div v-show="tab===3" class="panel">
-        <h2>消费水位</h2>
+      <div v-show="tab===5" class="panel">
+        <h2>消费水位（驳回不推水位）</h2>
         <table><thead><tr><th>消费方</th><th>业务日</th><th>水位</th><th>来源切片</th></tr></thead>
         <tbody><tr v-for="w in watermarks" :key="w.id"><td>{{w.consumer}}</td><td>{{w.biz_date}}</td><td class="mono">{{w.watermark}}</td><td class="mono">{{w.source_slice}}</td></tr></tbody></table>
+      </div>
+      <div v-show="tab===6" class="panel">
+        <h2>冲突队列（同单驳回/确认撞车，后手争用落队）</h2>
+        <table><thead><tr><th>待审单</th><th>先手</th><th>后手（争用失败）</th><th>争用人</th><th>说明</th><th>时间</th></tr></thead>
+        <tbody>
+          <tr v-if="!conflicts.length"><td colspan="6" class="muted">暂无冲突</td></tr>
+          <tr v-for="f in conflicts" :key="f.id">
+            <td class="mono">{{f.ticket_no}}</td><td><span class="tag">{{f.winner_action}}</span></td>
+            <td><span class="tag bad">{{f.loser_action}}</span></td><td>{{f.loser}}</td>
+            <td>{{f.detail}}</td><td class="mono">{{f.created_at}}</td>
+          </tr>
+        </tbody></table>
+      </div>
+      <div v-show="tab===7" class="panel">
+        <h2>处置页（审计流水，偏离即「驳回口径偏了」）</h2>
+        <table><thead><tr><th>时间</th><th>待审单</th><th>处置人/角色</th><th>动作</th><th>类型</th><th>对象</th><th>明细</th></tr></thead>
+        <tbody><tr v-for="a in audits" :key="a.id">
+          <td class="mono">{{a.created_at}}</td><td class="mono">{{a.ticket_no}}</td><td>{{a.actor}}/{{a.role}}</td>
+          <td>{{a.action}}</td>
+          <td><span class="tag" :class="{bad:a.kind==='deviation',warn:a.kind==='normal'&&a.action==='驳回'}">{{a.kind==='deviation'?'偏离':'正常'}}</span></td>
+          <td class="mono">{{a.target}}</td><td>{{a.detail}}</td>
+        </tr></tbody></table>
       </div>
     </main>
   </div>`
